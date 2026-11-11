@@ -1,7 +1,7 @@
 # Multi-stage build: compile with the full Go toolchain, run on a minimal,
 # non-root, shell-less base. Keeps the shipped image small and reduces attack
 # surface (no shell, no package manager, nothing an attacker could use post-exploit).
-FROM golang:1.23-alpine AS build
+FROM golang:1.25-alpine AS build
 WORKDIR /src
 
 # Cache dependency downloads separately from source changes.
