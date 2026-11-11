@@ -14,11 +14,39 @@ import (
 // method opens its own transaction - that's the transaction-boundary rule from
 // DESIGN.md §1.
 type Service struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	notifier func()
 }
 
-func New(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+// Option customizes Service. Options keep New's call sites simple while letting
+// main wire the outbox's post-commit nudge without making the service layer
+// depend on the messaging/outbox packages.
+type Option func(*Service)
+
+// WithNotifier registers a post-commit wake-up (the outbox relay's Notify). It is
+// called only after a mutation transaction commits, never on rollback or error.
+func WithNotifier(notify func()) Option {
+	return func(s *Service) {
+		if notify != nil {
+			s.notifier = notify
+		}
+	}
+}
+
+func New(pool *pgxpool.Pool, opts ...Option) *Service {
+	s := &Service{pool: pool}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// notify post-commit nudges the relay. The 500 ms poll remains the safety net if
+// this is a no-op or the process crashes between commit and notify (DESIGN.md §6).
+func (s *Service) notify() {
+	if s.notifier != nil {
+		s.notifier()
+	}
 }
 
 // CreateTenant inserts the tenant (provisioning) and its deploy task (accepted)
@@ -54,6 +82,7 @@ func (s *Service) CreateTenant(ctx context.Context, slug, name string) (store.Te
 		}
 		return store.Tenant{}, store.Task{}, err
 	}
+	s.notify()
 
 	tenant, err = refetchTenant(ctx, s.pool, tenant.ID)
 	return tenant, task, err
@@ -86,6 +115,7 @@ func (s *Service) UpdateTenant(ctx context.Context, id uuid.UUID, name string, v
 	if err != nil {
 		return store.Tenant{}, store.Task{}, err
 	}
+	s.notify()
 	return tenant, task, nil
 }
 
@@ -113,6 +143,7 @@ func (s *Service) DeleteTenant(ctx context.Context, id uuid.UUID, version int64)
 	if err != nil {
 		return store.Tenant{}, store.Task{}, err
 	}
+	s.notify()
 	return tenant, task, nil
 }
 

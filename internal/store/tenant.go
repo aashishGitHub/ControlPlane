@@ -39,6 +39,18 @@ func GetTenantByID(ctx context.Context, db DB, id uuid.UUID) (Tenant, error) {
 	return scanTenant(row)
 }
 
+// GetTenantForUpdate locks the tenant row. The consumer takes this lock before the
+// task lock (DESIGN.md §6 Inbound step 3) to match the API path's tenant -> task
+// lock order and avoid deadlocks; it also stabilizes the expected-status guard
+// while the terminal outcome is applied.
+func GetTenantForUpdate(ctx context.Context, db DB, id uuid.UUID) (Tenant, error) {
+	row := db.QueryRow(ctx, `
+		SELECT id, slug, name, status, version, created_at, updated_at
+		FROM tenants WHERE id = $1
+		FOR UPDATE`, id)
+	return scanTenant(row)
+}
+
 // ListTenants returns up to limit tenants with id > cursor (zero UUID means "from
 // the start"), optionally filtered by status, ordered by id. DESIGN.md §4: id is
 // UUIDv7 (time-ordered), so this keyset is equivalent to "created after cursor"

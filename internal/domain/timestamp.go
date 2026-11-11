@@ -13,6 +13,13 @@ import (
 // brief and a dedicated type is needed.
 const wireLayout = "2006-01-02T15:04:05.000Z"
 
+// FormatTimestamp renders t in the brief's wire format. Exported so messaging
+// payload builders use the exact same layout as HTTP responses instead of
+// re-deriving the format string at each call site.
+func FormatTimestamp(t time.Time) string {
+	return t.UTC().Format(wireLayout)
+}
+
 // Timestamp wraps time.Time to control exactly how it's rendered on the wire.
 //
 // Pattern: Value Object. Why: every API response field that's a timestamp uses
@@ -26,7 +33,7 @@ func NewTimestamp(t time.Time) Timestamp { return Timestamp(t.UTC()) }
 func (t Timestamp) Time() time.Time { return time.Time(t) }
 
 func (t Timestamp) MarshalJSON() ([]byte, error) {
-	s := time.Time(t).UTC().Format(wireLayout)
+	s := FormatTimestamp(time.Time(t))
 	return []byte(`"` + s + `"`), nil
 }
 

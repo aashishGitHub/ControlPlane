@@ -50,6 +50,29 @@ func IsTaskTerminal(status TaskStatus) bool {
 	return status == TaskDone || status == TaskFailed
 }
 
+// ParseTaskStatus validates an inbound status string against the known set.
+//
+// Pattern: closed-vocabulary validation before map lookup. Why: a missing entry
+// in taskRank yields rank 0, which is indistinguishable from "accepted" - an
+// unknown status would be silently acked as stale instead of dead-lettered
+// (DESIGN.md §6 Inbound / §7).
+func ParseTaskStatus(s string) (TaskStatus, bool) {
+	status := TaskStatus(s)
+	_, ok := taskRank[status]
+	return status, ok
+}
+
+// ParseTaskType validates an inbound task type against the known set.
+func ParseTaskType(s string) (TaskType, bool) {
+	taskType := TaskType(s)
+	switch taskType {
+	case TaskDeploy, TaskUpdate, TaskDestroy:
+		return taskType, true
+	default:
+		return "", false
+	}
+}
+
 // --- Tenant state machine (DESIGN.md §3) --------------------------------------------
 
 type TenantStatus string

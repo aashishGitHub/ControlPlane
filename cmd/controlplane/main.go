@@ -1,6 +1,5 @@
 // Command controlplane boots the HTTP API + message consumer + outbox relay as one
-// process (the brief's "one deployable unit"). As of M2 it boots the DB pool,
-// service, and HTTP router; the messaging/outbox pieces arrive in M3.
+// process (the brief's "one deployable unit").
 package main
 
 import (
@@ -13,6 +12,8 @@ import (
 	"time"
 
 	"github.com/aashishGithub/controlplane/internal/httpapi"
+	"github.com/aashishGithub/controlplane/internal/messaging"
+	"github.com/aashishGithub/controlplane/internal/outbox"
 	"github.com/aashishGithub/controlplane/internal/service"
 	"github.com/aashishGithub/controlplane/internal/store"
 )
@@ -35,10 +36,38 @@ func main() {
 	}
 	defer pool.Close()
 
-	svc := service.New(pool)
+	amqpURL := os.Getenv("AMQP_URL")
+	if amqpURL == "" {
+		amqpURL = "amqp://guest:guest@localhost:5672/"
+	}
+	mc, err := messaging.NewConnManager(messaging.Config{
+		URL:               amqpURL,
+		ReconnectInterval: 500 * time.Millisecond,
+		Log:               logger,
+	})
+	if err != nil {
+		logger.Error("messaging init failed", "error", err)
+		os.Exit(1)
+	}
+	defer mc.Close()
+
+	relay := outbox.NewRelay(pool, mc, logger)
+	svc := service.New(pool, service.WithNotifier(relay.Notify))
+
+	go relay.Run(ctx)
+	go messaging.ConsumeUpdates(ctx, mc, logger, func(ctx context.Context, update messaging.TaskUpdate) error {
+		_, err := svc.ApplyTaskUpdate(ctx, service.TaskUpdate{
+			MessageID: update.MessageID,
+			TaskID:    update.TaskID,
+			Status:    update.Status,
+			Reason:    update.Reason,
+		})
+		return err
+	})
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           httpapi.New(svc, pool),
+		Handler:           httpapi.New(svc, pool, mc),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

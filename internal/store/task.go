@@ -42,6 +42,17 @@ func GetTaskByID(ctx context.Context, db DB, id uuid.UUID) (Task, error) {
 	return scanTask(row)
 }
 
+// GetTaskForUpdate re-reads the task under a row lock. The consumer locks the
+// tenant first, then the task: the API path also touches tenant before task, so a
+// consistent order prevents ABBA deadlocks (DESIGN.md §6 Inbound step 3).
+func GetTaskForUpdate(ctx context.Context, db DB, id uuid.UUID) (Task, error) {
+	row := db.QueryRow(ctx, `
+		SELECT id, tenant_id, type, status, error, created_at, updated_at, published_at
+		FROM tasks WHERE id = $1
+		FOR UPDATE`, id)
+	return scanTask(row)
+}
+
 // ListTasksByTenant returns a tenant's tasks newest-first (no pagination - a
 // tenant has at most a handful of tasks, one per lifecycle transition).
 func ListTasksByTenant(ctx context.Context, db DB, tenantID uuid.UUID) ([]Task, error) {

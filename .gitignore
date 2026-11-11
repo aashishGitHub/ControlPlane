@@ -3,3 +3,4 @@ bin/
 *.exe
 *.test
 coverage.out
+M3-RELEVANT-QNA.md
