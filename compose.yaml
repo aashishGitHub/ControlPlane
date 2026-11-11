@@ -45,8 +45,21 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  # worker: arrives in M4 - its Dockerfile target (cmd/worker) doesn't exist yet,
-  # so it's intentionally left out rather than added as a broken/no-op service.
+  worker:
+    build:
+      context: .
+      args:
+        TARGET: worker
+    environment:
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+      FAIL_RATE: ${FAIL_RATE:-0}
+      MIN_DELAY_MS: ${MIN_DELAY_MS:-100}
+      MAX_DELAY_MS: ${MAX_DELAY_MS:-800}
+      DUPLICATE_RATE: ${DUPLICATE_RATE:-0}
+      REORDER: ${REORDER:-false}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
 volumes:
   pgdata:

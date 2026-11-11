@@ -1,10 +1,13 @@
 package messaging_test
 
 import (
-	"context"
+	"bytes"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,66 +16,50 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/aashishGithub/controlplane/internal/messaging"
-	"github.com/aashishGithub/controlplane/internal/store"
+	"github.com/aashishGithub/controlplane/internal/testutil"
 )
 
-// integrationLockKey must match internal/service/testhelpers_test.go: `go test
-// ./...` runs packages in parallel and every integration test truncates the same
-// tables. One cross-package advisory lock keeps them serialized.
-const integrationLockKey int64 = 0x4d334d33
+// testVhost isolates the broker tests from a running `make up` stack. The real
+// controlplane/worker consume from "/", so sharing it would make these tests race
+// a production consumer for messages (and flake intermittently).
+const testVhost = "controlplane_test"
+
+var (
+	vhostOnce sync.Once
+	vhostErr  error
+)
 
 func testLogger() *slog.Logger {
+	if os.Getenv("TEST_LOG") != "" {
+		return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("DATABASE_URL")
-	if url == "" {
-		url = "postgres://controlplane:localdev@localhost:5432/controlplane?sslmode=disable"
-	}
-
-	ctx := context.Background()
-	pool, err := store.Open(ctx, url)
-	require.NoError(t, err, "is `make up` running? Postgres must be reachable at %s", url)
-
-	t.Cleanup(pool.Close)
-	acquireIntegrationLock(t, pool)
+	pool := testutil.OpenDB(t)
 	truncateAll(t, pool)
 	return pool
 }
 
-func acquireIntegrationLock(t *testing.T, pool *pgxpool.Pool) {
-	t.Helper()
-	ctx := context.Background()
-	conn, err := pool.Acquire(ctx)
-	require.NoError(t, err)
-	_, err = conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, integrationLockKey)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, integrationLockKey)
-		conn.Release()
-	})
-}
-
 func truncateAll(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	_, err := pool.Exec(context.Background(), `TRUNCATE tasks, processed_messages, tenants`)
-	require.NoError(t, err)
+	testutil.TruncateAll(t, pool)
 }
 
 func testConn(t *testing.T) *messaging.ConnManager {
 	t.Helper()
-	url := os.Getenv("AMQP_URL")
-	if url == "" {
-		url = "amqp://guest:guest@localhost:5672/"
-	}
+	vhostOnce.Do(func() { vhostErr = resetTestVhost() })
+	require.NoError(t, vhostErr, "failed to create RabbitMQ test vhost %q", testVhost)
+
+	amqpURL := testAMQPURL(t)
 	cm, err := messaging.NewConnManager(messaging.Config{
-		URL:               url,
+		URL:               amqpURL,
 		ReconnectInterval: 250 * time.Millisecond,
 		Log:               testLogger(),
 	})
-	require.NoError(t, err, "is `make up` running? RabbitMQ must be reachable at %s", url)
+	require.NoError(t, err, "is `make up` running? RabbitMQ must be reachable at %s", amqpURL)
 	t.Cleanup(func() { _ = cm.Close() })
 
 	ch := testChannel(t, cm)
@@ -89,6 +76,92 @@ func testChannel(t *testing.T, cm *messaging.ConnManager) *amqp.Channel {
 	ch, err := cm.Channel()
 	require.NoError(t, err)
 	return ch
+}
+
+func amqpBaseURL() string {
+	raw := os.Getenv("AMQP_URL")
+	if raw == "" {
+		raw = "amqp://guest:guest@localhost:5672/"
+	}
+	return raw
+}
+
+func testAMQPURL(t *testing.T) string {
+	t.Helper()
+	u, err := url.Parse(amqpBaseURL())
+	require.NoError(t, err)
+	u.Path = "/" + testVhost
+	return u.String()
+}
+
+// resetTestVhost recreates a dedicated vhost via the management HTTP API. The
+// default "/" vhost is left alone: it belongs to the running compose stack.
+// RABBIT_MGMT_URL overrides the default http://localhost:15672.
+func resetTestVhost() error {
+	u, err := url.Parse(amqpBaseURL())
+	if err != nil {
+		return err
+	}
+	username := "guest"
+	password := "guest"
+	if u.User != nil {
+		if name := u.User.Username(); name != "" {
+			username = name
+		}
+		if pass, ok := u.User.Password(); ok {
+			password = pass
+		}
+	}
+
+	mgmtURL := os.Getenv("RABBIT_MGMT_URL")
+	if mgmtURL == "" {
+		mgmtURL = "http://localhost:15672"
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	do := func(method, path, body string, allowed ...int) error {
+		req, err := http.NewRequest(method, mgmtURL+path, bytes.NewBufferString(body))
+		if err != nil {
+			return err
+		}
+		req.SetBasicAuth(username, password)
+		if body != "" {
+			req.Header.Set("content-type", "application/json")
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		for _, status := range allowed {
+			if resp.StatusCode == status {
+				return nil
+			}
+		}
+		payload, _ := io.ReadAll(resp.Body)
+		return &httpError{method: method, path: path, status: resp.StatusCode, body: string(payload)}
+	}
+
+	if err := do(http.MethodDelete, "/api/vhosts/"+testVhost, "", http.StatusNoContent, http.StatusNotFound); err != nil {
+		return err
+	}
+	if err := do(http.MethodPut, "/api/vhosts/"+testVhost, "", http.StatusCreated, http.StatusNoContent); err != nil {
+		return err
+	}
+	permissions := `{"configure":".*","write":".*","read":".*"}`
+	permissionPath := "/api/permissions/" + testVhost + "/" + url.PathEscape(username)
+	return do(http.MethodPut, permissionPath, permissions, http.StatusCreated, http.StatusNoContent)
+}
+
+type httpError struct {
+	method string
+	path   string
+	status int
+	body   string
+}
+
+func (e *httpError) Error() string {
+	return e.method + " " + e.path + ": unexpected status " + http.StatusText(e.status) + ": " + e.body
 }
 
 // requireMessage polls the queue until one message arrives. ch.Get is used
