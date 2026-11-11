@@ -8,7 +8,7 @@ import "testing"
 func TestTaskUpdateAllowed(t *testing.T) {
 	cases := []struct {
 		current, next TaskStatus
-		want           bool
+		want          bool
 	}{
 		// forward progress: allowed
 		{TaskAccepted, TaskInProgress, true},
@@ -64,11 +64,11 @@ func TestIsTaskTerminal(t *testing.T) {
 // call this for accepted/in_progress - this test documents and locks that contract).
 func TestTenantOutcome(t *testing.T) {
 	cases := []struct {
-		taskType       TaskType
-		taskStatus     TaskStatus
-		wantExpected   TenantStatus
-		wantNext       TenantStatus
-		wantOK         bool
+		taskType     TaskType
+		taskStatus   TaskStatus
+		wantExpected TenantStatus
+		wantNext     TenantStatus
+		wantOK       bool
 	}{
 		{TaskDeploy, TaskDone, TenantProvisioning, TenantActive, true},
 		{TaskDeploy, TaskFailed, TenantProvisioning, TenantFailed, true},

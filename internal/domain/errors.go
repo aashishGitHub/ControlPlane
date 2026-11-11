@@ -6,14 +6,14 @@ package domain
 type ErrorCode string
 
 const (
-	ErrTenantNotFound        ErrorCode = "tenant_not_found"
-	ErrTenantAlreadyExists   ErrorCode = "tenant_already_exists"
+	ErrTenantNotFound         ErrorCode = "tenant_not_found"
+	ErrTenantAlreadyExists    ErrorCode = "tenant_already_exists"
 	ErrTenantUpdateNotAllowed ErrorCode = "tenant_update_not_allowed"
-	ErrTenantVersionConflict ErrorCode = "tenant_version_conflict"
-	ErrTaskNotFound          ErrorCode = "task_not_found"
-	ErrValidation            ErrorCode = "validation_error"
-	ErrMalformedRequest      ErrorCode = "malformed_request"
-	ErrInternal              ErrorCode = "internal_error"
+	ErrTenantVersionConflict  ErrorCode = "tenant_version_conflict"
+	ErrTaskNotFound           ErrorCode = "task_not_found"
+	ErrValidation             ErrorCode = "validation_error"
+	ErrMalformedRequest       ErrorCode = "malformed_request"
+	ErrInternal               ErrorCode = "internal_error"
 )
 
 // Error is a structured domain error. It carries the stable Code plus a human

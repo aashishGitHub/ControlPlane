@@ -8,8 +8,8 @@ func TestValidSlug(t *testing.T) {
 		want bool
 	}{
 		// valid
-		{"abc", true},                              // minimum length (3)
-		{"a222222222222222222222222227", true},      // exactly 28 chars (1+26+1)
+		{"abc", true},                          // minimum length (3)
+		{"a222222222222222222222222227", true}, // exactly 28 chars (1+26+1)
 		{"acme", true},
 		{"acme-prod", true},
 		{"a1b2c3", true},
