@@ -12,8 +12,18 @@ down:
 logs:
 	docker compose logs -f
 
-## test: run the Go test suite with the race detector
+## test: run the Go test suite. No -race here: the race detector needs cgo/gcc,
+## which Windows doesn't ship by default. Race detection runs in the Linux-based
+## test container instead (see `test-race`, wired into `make check` in M5), which
+## already has a C toolchain - so the one check that most needs to catch real
+## concurrency bugs still runs, just not on every local Windows `make test`.
 test:
+	go test ./...
+
+## test-race: run with the race detector - requires cgo (gcc). Run inside the
+## Linux container in CI/`make check`, or locally on Linux/macOS, or on Windows
+## after installing a gcc toolchain (e.g. WinLibs/MSYS2).
+test-race:
 	go test -race ./...
 
 ## fmt: reformat all Go source in place
