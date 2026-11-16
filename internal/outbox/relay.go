@@ -90,7 +90,7 @@ func (r *Relay) RunOnce(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("outbox: channel: %w", err)
 	}
-	defer ch.Close()
+	defer func() { _ = ch.Close() }()
 
 	publisher, err := messaging.NewPublisher(ch)
 	if err != nil {

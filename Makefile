@@ -1,4 +1,4 @@
-.PHONY: up down logs test test-race check fmt fmt-check lint worker-restart race-demo
+.PHONY: up down logs deps test test-race check fmt fmt-check lint worker-restart race-demo
 
 # Windows resolves bare `bash` to WSL's C:\Windows\System32\bash.exe, which may
 # have no distro installed. Use Git Bash explicitly; Linux/macOS keep plain bash.
@@ -7,6 +7,21 @@ BASH ?= "C:/Program Files/Git/bin/bash.exe"
 else
 BASH ?= bash
 endif
+
+# Pinned tool images. `make lint` and `make test-race` run in containers so the
+# quality gate works identically on Windows (no local gcc for -race) and on
+# Linux/macOS, without requiring reviewers to install extra binaries.
+GO_IMAGE ?= golang:1.25
+GOLANGCI_LINT_IMAGE ?= golangci/golangci-lint:v2.15.0-alpine
+
+# compose.yaml sets `name: controlplane`, so the default network is fixed.
+COMPOSE_NETWORK ?= controlplane_default
+
+# Integration tests inside a container must use Compose service DNS names, not
+# localhost. These are local-dev credentials from compose.yaml, not secrets.
+TEST_DATABASE_URL ?= postgres://controlplane:localdev@postgres:5432/controlplane?sslmode=disable
+TEST_AMQP_URL ?= amqp://guest:guest@rabbitmq:5672/
+TEST_RABBIT_MGMT_URL ?= http://guest:guest@rabbitmq:15672
 
 # Worker fault-injection knobs. `export` passes them into the compose recipe, so
 # `make worker-restart FAIL_RATE=1` works without POSIX inline env assignments
@@ -21,6 +36,10 @@ export FAIL_RATE MIN_DELAY_MS MAX_DELAY_MS DUPLICATE_RATE REORDER
 ## up: build and boot the full stack (postgres, rabbitmq, controlplane, worker)
 up:
 	docker compose up -d --build --wait
+
+## deps: start only Postgres and RabbitMQ (used by the test targets)
+deps:
+	docker compose up -d --wait postgres rabbitmq
 
 ## worker-restart: rebuild/recreate only the worker; `make worker-restart FAIL_RATE=1`
 worker-restart:
@@ -38,34 +57,35 @@ down:
 logs:
 	docker compose logs -f
 
-## test: run the Go test suite. No -race here: the race detector needs cgo/gcc,
-## which Windows doesn't ship by default. Race detection runs in the Linux-based
-## test container instead (see `test-race`, wired into `make check` in M5), which
-## already has a C toolchain - so the one check that most needs to catch real
-## concurrency bugs still runs, just not on every local Windows `make test`.
-test:
-	go test ./...
+## test: run the Go test suite against Postgres + RabbitMQ (started by `deps`)
+test: deps
+	go test ./... -count=1
 
-## test-race: run with the race detector - requires cgo (gcc). Run inside the
-## Linux container in CI/`make check`, or locally on Linux/macOS, or on Windows
-## after installing a gcc toolchain (e.g. WinLibs/MSYS2).
-test-race:
-	go test -race ./...
+## test-race: run the full suite under the race detector in Linux (needs cgo).
+## The container joins the Compose network and uses service DNS + the dedicated
+## test database/vhost, so it cannot collide with the running dev stack.
+test-race: deps
+	docker run --rm --network $(COMPOSE_NETWORK) \
+		-v "$(CURDIR):/src" -w /src \
+		-e DATABASE_URL="$(TEST_DATABASE_URL)" \
+		-e AMQP_URL="$(TEST_AMQP_URL)" \
+		-e RABBIT_MGMT_URL="$(TEST_RABBIT_MGMT_URL)" \
+		$(GO_IMAGE) go test -race ./... -count=1
 
 ## fmt: reformat all Go source in place
 fmt:
 	gofmt -w .
 
-## fmt-check: fail if any file is not gofmt-formatted (used by `make check`)
+## fmt-check: fail if any file is not gofmt-formatted.
+## Implemented with Make functions (no POSIX test/[ ]) so it works in both
+## cmd.exe and sh; the old recipe only worked under a POSIX shell.
 fmt-check:
-	@unformatted=$$(gofmt -l .); \
-	if [ -n "$$unformatted" ]; then \
-		echo "not gofmt-formatted:"; echo "$$unformatted"; exit 1; \
-	fi
+	@$(if $(shell gofmt -l .),$(error not gofmt-formatted: $(shell gofmt -l .)),echo gofmt: clean)
 
-## lint: static analysis - wired up fully in M5 (golangci-lint, govulncheck, gitleaks)
+## lint: golangci-lint (errcheck, govet, staticcheck, unused, gosec, ...)
 lint:
-	@echo "lint: placeholder until M5"
+	docker run --rm -v "$(CURDIR):/src" -w /src \
+		$(GOLANGCI_LINT_IMAGE) golangci-lint run
 
-## check: everything the quality gate requires (NFR-5) - run before every commit
-check: fmt-check lint test
+## check: the full quality gate (NFR-4) - run before every commit
+check: fmt-check lint test test-race

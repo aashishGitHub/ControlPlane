@@ -1,0 +1,4 @@
+# Keep repository text files LF on every platform. Without this, Windows Git's
+# core.autocrlf converts Go sources to CRLF on checkout and `gofmt -l .` flags
+# every file, breaking `make check` from a cold clone.
+* text=auto eol=lf

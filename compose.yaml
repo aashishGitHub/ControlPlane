@@ -19,14 +19,23 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
+    environment:
+      # Fixed local-dev cookie. Without it, the official alpine image creates
+      # /var/lib/rabbitmq/.erlang.cookie as uid 100 with mode 0400, which some
+      # Docker Desktop/Windows setups cannot read (container exits with eacces).
+      # This is a local-only value, not a real credential.
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-localdev-cookie}
     ports:
       - "5672:5672"   # AMQP
       - "15672:15672" # management UI - http://localhost:15672 (guest/guest)
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # `ping` only proves the Erlang node is alive; the AMQP listener can
+      # still be closed, so `depends_on: service_healthy` races startup. This
+      # check waits until the broker actually accepts connections.
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
       interval: 2s
-      timeout: 3s
-      retries: 15
+      timeout: 5s
+      retries: 30
 
   controlplane:
     build:

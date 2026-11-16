@@ -38,7 +38,7 @@ func TestRelayPublishesCommittedTaskOnce(t *testing.T) {
 	require.Equal(t, 1, published)
 
 	ch := testChannel(t, cm)
-	defer ch.Close()
+	defer func() { _ = ch.Close() }()
 	delivery := requireMessage(t, ch, messaging.QueueWorkerTasks, 5*time.Second)
 
 	var wire messaging.TaskMsg
@@ -106,7 +106,7 @@ func TestRelayRollbackPublishesNothing(t *testing.T) {
 	require.Zero(t, published)
 
 	ch := testChannel(t, cm)
-	defer ch.Close()
+	defer func() { _ = ch.Close() }()
 	requireNoMessage(t, ch, messaging.QueueWorkerTasks)
 }
 
@@ -124,7 +124,7 @@ func TestRelayClaimSkipsLockedRows(t *testing.T) {
 
 	first, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	defer first.Rollback(ctx)
+	defer func() { _ = first.Rollback(ctx) }()
 
 	claimedFirst, err := store.ClaimUnpublishedTasks(ctx, first, 10)
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestRelayClaimSkipsLockedRows(t *testing.T) {
 
 	second, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	defer second.Rollback(ctx)
+	defer func() { _ = second.Rollback(ctx) }()
 
 	claimedSecond, err := store.ClaimUnpublishedTasks(ctx, second, 10)
 	require.NoError(t, err)

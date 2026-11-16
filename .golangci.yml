@@ -1,0 +1,28 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused.
+  # Keep the gate strict but low-noise: these catch real correctness issues
+  # without forcing style rewrites on a take-home codebase.
+  default: standard
+  enable:
+    - bodyclose
+    - gosec
+    - misspell
+  settings:
+    gosec:
+      excludes:
+        # math/rand/v2 is intentionally used for simulator delay/jitter; it is
+        # not a security-sensitive random source.
+        - G404
+  exclusions:
+    generated: strict
+    rules:
+      # Test fixtures contain literal local-dev credentials and deliberately
+      # exercise failure paths that gosec flags.
+      - path: _test\.go
+        linters:
+          - gosec

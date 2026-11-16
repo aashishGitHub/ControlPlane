@@ -37,7 +37,7 @@ func main() {
 
 	amqpURL := os.Getenv("AMQP_URL")
 	if amqpURL == "" {
-		amqpURL = "amqp://guest:guest@localhost:5672/"
+		amqpURL = "amqp://guest:guest@localhost:5672/" //nolint:gosec // documented local-dev default
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -52,7 +52,7 @@ func main() {
 		logger.Error("messaging init failed", "error", err)
 		os.Exit(1)
 	}
-	defer cm.Close()
+	defer func() { _ = cm.Close() }()
 
 	w, err := worker.New(cm, logger, opts)
 	if err != nil {

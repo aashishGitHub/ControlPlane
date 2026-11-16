@@ -38,7 +38,7 @@ func main() {
 
 	amqpURL := os.Getenv("AMQP_URL")
 	if amqpURL == "" {
-		amqpURL = "amqp://guest:guest@localhost:5672/"
+		amqpURL = "amqp://guest:guest@localhost:5672/" //nolint:gosec // documented local-dev default
 	}
 	mc, err := messaging.NewConnManager(messaging.Config{
 		URL:               amqpURL,
@@ -49,7 +49,7 @@ func main() {
 		logger.Error("messaging init failed", "error", err)
 		os.Exit(1)
 	}
-	defer mc.Close()
+	defer func() { _ = mc.Close() }()
 
 	relay := outbox.NewRelay(pool, mc, logger)
 	svc := service.New(pool, service.WithNotifier(relay.Notify))

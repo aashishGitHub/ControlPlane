@@ -11,9 +11,9 @@ RabbitMQ, the API, the outbox relay, the progress consumer, and a worker
 simulator. The core flow is covered by an in-process lifecycle test against real
 Postgres and RabbitMQ.
 
-**Current status:** implementation through the worker milestone is complete and
-the full lifecycle test is green. The remaining M5 work is the quality gate:
-lint/security checks, race container, and cold-clone verification.
+**Current status:** implementation through the worker milestone is complete, the
+full lifecycle test is green, and `make check` (format, lint, tests, race
+detector) passes from a cold clone.
 
 ## Contents
 
@@ -304,6 +304,17 @@ make up
 ### Run the complete suite
 
 ```bash
+make test
+```
+
+`make test` first starts (or reuses) the Postgres and RabbitMQ services, then
+runs `go test ./... -count=1` on the host. Running `make up` first is still fine;
+the dependency target is idempotent.
+
+To run `go test` directly, start the dependencies yourself:
+
+```bash
+make deps
 go test ./... -count=1
 ```
 
@@ -313,15 +324,29 @@ On PowerShell, to show only the final lines:
 go test ./... -count=1 2>&1 | Select-Object -Last 40
 ```
 
-Formatting and static analysis:
+### Quality gate
+
+The single command the brief asks for is:
 
 ```bash
-gofmt -l .
-go vet ./...
+make check
 ```
 
-Both should produce no output. `go test ./...` is the fastest way to check the
-whole suite; `make test` runs the same suite.
+It runs, in order:
+
+| Step | Command | What it proves |
+|---|---|---|
+| Format | `make fmt-check` | Every Go file is `gofmt`-clean |
+| Lint | `make lint` | `golangci-lint` (errcheck, govet, staticcheck, unused, gosec, bodyclose, misspell) reports zero issues |
+| Tests | `make test` | The full suite passes against Postgres + RabbitMQ |
+| Race detector | `make test-race` | The full suite passes under `-race` in a Linux container |
+
+The lint and race steps run in pinned Docker images
+(`golangci/golangci-lint:v2.15.0-alpine` and `golang:1.25`), so no local gcc or
+`golangci-lint` install is required. `make test-race` joins the Compose network
+and points at the dedicated `controlplane_test` database and vhost, so it cannot
+collide with the running dev stack. The first run downloads the images and Go
+modules; later runs are faster.
 
 ### Test layers
 
@@ -331,7 +356,7 @@ whole suite; `make test` runs the same suite.
 | Service/concurrency | `go test ./internal/service/... -count=1` | 50-way create-slug race and 50-way version race |
 | Messaging/outbox | `go test ./internal/messaging/... -count=1` | Publisher confirms, outbox commit/rollback, duplicate/stale updates, poison/DLQ, topology |
 | Full lifecycle | `go test ./internal/messaging -run TestFullLifecycleInProcess -count=1 -v` | Create -> active -> patch -> active -> delete -> destroyed -> recreate 409 |
-| Race detector | `make test-race` | Data races in Go code; requires cgo/gcc |
+| Race detector | `make test-race` | Data races in Go code; runs in a Linux container with cgo |
 
 The full lifecycle test boots the real relay, consumer, and worker in-process
 against Postgres and RabbitMQ. It does not start an HTTP server; the HTTP
@@ -383,13 +408,17 @@ On bash:
 TEST_LOG=1 go test ./internal/messaging -run TestFullLifecycleInProcess -count=1 -v
 ```
 
-### Quality gate status
+### Quality gate details
 
-`make test` runs `go test ./...`. The full `make check` gate is part of the
-unfinished M5 polish: `lint` is still a placeholder, and the current Windows
-`fmt-check` recipe uses POSIX shell syntax. Use `make test`, `go vet ./...`, and
-`gofmt -l .` locally until that gate is finished. `make test-race` needs a C
-toolchain and is intended for Linux/macOS or the M5 test container.
+`make fmt-check` is implemented with Make functions rather than POSIX
+`test -z "$(gofmt -l .)"`, so it works under both `cmd.exe` (the default GNU
+Make shell on Windows) and `sh`.
+
+The linter configuration lives in [`.golangci.yml`](.golangci.yml). It uses the
+standard linter set plus `gosec`, `bodyclose`, and `misspell`. `math/rand/v2` is
+excluded from `gosec` because the worker uses it for non-security delay jitter;
+test fixtures are excluded because they deliberately contain local-dev
+credentials and failure-path code.
 
 ## Manual verification and fault injection
 
@@ -469,10 +498,12 @@ succeeds and the tenant becomes `destroyed`.
 ### Other useful commands
 
 ```bash
+make check            # format + lint + tests + race detector
 make logs             # follow all service logs
 make worker-restart   # rebuild/recreate only the worker
 make fmt              # gofmt -w .
-make test             # go test ./...
+make test             # start deps + go test ./...
+make test-race        # full suite under -race in Linux
 make down             # remove containers and volumes
 ```
 
@@ -707,6 +738,7 @@ POSTGRES_DB=controlplane
 |-- compose.yaml
 |-- Dockerfile
 |-- Makefile
+|-- .golangci.yml
 `-- README.md
 ```
 
@@ -733,9 +765,10 @@ This is a take-home implementation, not a production deployment:
   RabbitMQ management UI.
 - There are no dedicated unit tests for `internal/httpapi` or `internal/worker`.
   They are exercised through the live API and the in-process lifecycle test.
-- `make check` is not finished: `lint` is a placeholder and the Windows
-  `fmt-check` recipe needs a portable shell wrapper. `make test-race` needs a C
-  toolchain and is intended for the M5 Linux container or Linux/macOS.
+- `make check` requires Docker for the lint and race containers; the first run
+  pulls the pinned images and Go modules. The lint gate is static analysis plus
+  `gosec`, not a full dependency vulnerability scan (`govulncheck` could be
+  added as a separate target).
 
 ## Further documentation
 

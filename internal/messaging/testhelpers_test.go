@@ -63,7 +63,7 @@ func testConn(t *testing.T) *messaging.ConnManager {
 	t.Cleanup(func() { _ = cm.Close() })
 
 	ch := testChannel(t, cm)
-	defer ch.Close()
+	defer func() { _ = ch.Close() }()
 	for _, queue := range []string{messaging.QueueWorkerTasks, messaging.QueueTaskUpdates, messaging.QueueTaskUpdatesDLQ} {
 		_, err := ch.QueuePurge(queue, false)
 		require.NoError(t, err)
@@ -132,7 +132,7 @@ func resetTestVhost() error {
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		for _, status := range allowed {
 			if resp.StatusCode == status {
 				return nil

@@ -67,7 +67,7 @@ func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(db DB) error) error
 	if err != nil {
 		return fmt.Errorf("store: begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx) // no-op if already committed
+	defer func() { _ = tx.Rollback(ctx) }() // no-op if already committed
 
 	if err := fn(tx); err != nil {
 		return err

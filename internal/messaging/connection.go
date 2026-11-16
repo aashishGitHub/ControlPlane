@@ -130,7 +130,10 @@ func (cm *ConnManager) run() {
 		select {
 		case <-cm.done:
 			return
-		case <-closed:
+		case closeErr := <-closed:
+			if closeErr != nil {
+				cm.log.Warn("messaging: connection closed", "error", closeErr)
+			}
 			cm.mu.Lock()
 			if cm.conn == conn {
 				cm.conn = nil

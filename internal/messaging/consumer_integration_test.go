@@ -251,7 +251,7 @@ func TestConsumerDeadLettersPoisonAndKeepsProcessing(t *testing.T) {
 	})
 
 	ch := testChannel(t, cm)
-	defer ch.Close()
+	defer func() { _ = ch.Close() }()
 
 	require.NoError(t, ch.PublishWithContext(ctx, messaging.ExchangeTaskUpdates,
 		messaging.UpdateRoutingKey(string(domain.TaskDone)), false, false, amqp.Publishing{
@@ -313,7 +313,7 @@ func TestTopologyRoutesBothExchanges(t *testing.T) {
 	testPool(t)
 	cm := testConn(t)
 	ch := testChannel(t, cm)
-	defer ch.Close()
+	defer func() { _ = ch.Close() }()
 
 	publisher, err := messaging.NewPublisher(ch)
 	require.NoError(t, err)

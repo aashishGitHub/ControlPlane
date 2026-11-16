@@ -60,7 +60,7 @@ func consumeOnce(ctx context.Context, cm *ConnManager, log *slog.Logger, handle 
 	if err != nil {
 		return err
 	}
-	defer ch.Close()
+	defer func() { _ = ch.Close() }()
 
 	if err := ch.Qos(consumerPrefetch, 0, false); err != nil {
 		return fmt.Errorf("qos: %w", err)

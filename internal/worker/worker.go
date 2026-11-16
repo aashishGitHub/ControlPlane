@@ -95,13 +95,13 @@ func (w *Worker) consumeOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer consumeCh.Close()
+	defer func() { _ = consumeCh.Close() }()
 
 	publishCh, err := w.cm.Channel()
 	if err != nil {
 		return err
 	}
-	defer publishCh.Close()
+	defer func() { _ = publishCh.Close() }()
 
 	publisher, err := messaging.NewPublisher(publishCh)
 	if err != nil {
